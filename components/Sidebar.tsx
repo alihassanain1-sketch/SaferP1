@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { LayoutDashboard, Truck, CreditCard, Settings, Terminal, LogOut, ShieldAlert, Database, ShieldCheck } from 'lucide-react';
 import { ViewState, User } from '../types';
@@ -11,18 +10,22 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, user, onLogout }) => {
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'scraper', label: 'Live Scraper', icon: Terminal },
-    { id: 'carrier-search', label: 'Carrier Database', icon: Database },
-    { id: 'insurance-scraper', label: 'Insurance Scraper', icon: ShieldCheck },
-    { id: 'subscription', label: 'Subscription', icon: CreditCard },
-    { id: 'settings', label: 'Settings', icon: Settings },
+  const isAdmin = user.role === 'admin';
+
+  // Define all navigation items
+  const allNavItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, adminOnly: false },
+    { id: 'scraper', label: 'Live Scraper', icon: Terminal, adminOnly: true },
+    { id: 'carrier-search', label: 'Carrier Database', icon: Database, adminOnly: false },
+    { id: 'insurance-scraper', label: 'Insurance Scraper', icon: ShieldCheck, adminOnly: true },
+    { id: 'subscription', label: 'Subscription', icon: CreditCard, adminOnly: false },
+    { id: 'settings', label: 'Settings', icon: Settings, adminOnly: true },
+    { id: 'admin', label: 'Admin Panel', icon: ShieldAlert, adminOnly: true },
   ];
 
-  if (user.role === 'admin') {
-    navItems.push({ id: 'admin', label: 'Admin Panel', icon: ShieldAlert });
-  }
+  // Filter navigation items based on user role
+  // Admin sees all pages, regular users only see: Dashboard, Carrier Database, Subscription
+  const navItems = allNavItems.filter(item => isAdmin || !item.adminOnly);
 
   return (
     <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col h-screen fixed left-0 top-0 z-10">
@@ -51,7 +54,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, u
             >
               <Icon className="w-5 h-5" />
               <span className="font-medium">{item.label}</span>
-              {item.id === 'scraper' && (
+              {item.id === 'scraper' && isAdmin && (
                 <span className="ml-auto w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
               )}
               {item.id === 'admin' && (
