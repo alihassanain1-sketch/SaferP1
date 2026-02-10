@@ -1,4 +1,4 @@
-import { CarrierData, User, InsurancePolicy, BasicScore, OosRate } from '../types';
+import { CarrierData, User, InsurancePolicy, BasicScore, OosRate, BlockedIP } from '../types';
 import { fetchCarrierFromBackend, fetchSafetyFromBackend, fetchInsuranceFromBackend } from './backendService';
 
 // === HELPER FUNCTIONS ===
@@ -293,8 +293,10 @@ export const downloadCSV = (data: CarrierData[]) => {
 };
 
 export const MOCK_USERS: User[] = [
-  { id: '1', name: 'Admin User', email: 'wooohan3@gmail.com', role: 'admin', plan: 'Enterprise', dailyLimit: 100000, recordsExtractedToday: 450, lastActive: 'Now', ipAddress: '192.168.1.1', isOnline: true }
+  { id: '1', name: 'Admin User', email: 'wooohan3@gmail.com', role: 'admin', plan: 'Enterprise', dailyLimit: 100000, recordsExtractedToday: 450, lastActive: 'Now', ipAddress: '192.168.1.1', isOnline: true, isBlocked: false }
 ];
+
+export const BLOCKED_IPS: BlockedIP[] = [];
 
 export const generateMockCarrier = (mc: string, b: boolean): CarrierData => ({
   mcNumber: mc,
