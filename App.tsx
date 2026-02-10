@@ -90,6 +90,16 @@ const App: React.FC = () => {
   };
 
   const handleViewChange = (view: ViewState) => {
+    // Check if user has access to the requested view
+    const isAdmin = user?.role === 'admin';
+    const adminOnlyViews: ViewState[] = ['scraper', 'insurance-scraper', 'settings', 'admin'];
+    
+    // If non-admin tries to access admin-only view, redirect to dashboard
+    if (!isAdmin && adminOnlyViews.includes(view)) {
+      setCurrentView('dashboard');
+      return;
+    }
+
     if (view !== 'insurance-scraper') {
       setAutoStartInsurance(false);
     }
@@ -97,6 +107,14 @@ const App: React.FC = () => {
   };
 
   const renderContent = () => {
+    const isAdmin = user?.role === 'admin';
+    const adminOnlyViews: ViewState[] = ['scraper', 'insurance-scraper', 'settings', 'admin'];
+
+    // Security check: if non-admin somehow reaches admin-only view, show dashboard
+    if (!isAdmin && adminOnlyViews.includes(currentView)) {
+      return <Dashboard />;
+    }
+
     if (isLoadingCarriers && currentView === 'carrier-search') {
       return (
         <div className="flex items-center justify-center h-full">
@@ -122,7 +140,7 @@ const App: React.FC = () => {
       case 'carrier-search':
         return <CarrierSearch 
           carriers={allCarriers} 
-          onNavigateToInsurance={() => setCurrentView('insurance-scraper')} 
+          onNavigateToInsurance={() => isAdmin ? setCurrentView('insurance-scraper') : null} 
         />;
       case 'insurance-scraper':
         return <InsuranceScraper 
