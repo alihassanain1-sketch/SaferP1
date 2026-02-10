@@ -1,15 +1,26 @@
-import React, { useState } from 'react';
-import { Users, Activity, DollarSign, Server, Edit2, Save, X, Search, Ban, UserPlus, Shield, Trash2, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Users, Activity, DollarSign, Server, Edit2, Save, X, Search, Ban, UserPlus, Shield, Trash2, CheckCircle, RefreshCw } from 'lucide-react';
 import { User, BlockedIP } from '../types';
-import { MOCK_USERS, BLOCKED_IPS } from '../services/mockService';
+import { 
+  fetchUsersFromSupabase, 
+  createUserInSupabase, 
+  updateUserInSupabase, 
+  deleteUserFromSupabase,
+  fetchBlockedIPsFromSupabase,
+  blockIPInSupabase,
+  unblockIPInSupabase
+} from '../services/userService';
 
 export const AdminPanel: React.FC = () => {
-  const [users, setUsers] = useState<User[]>(MOCK_USERS);
-  const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>(BLOCKED_IPS);
+  const [users, setUsers] = useState<User[]>([]);
+  const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<User>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'blocked' | 'add'>('users');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   
   // Add user form state
   const [newUserName, setNewUserName] = useState('');
@@ -20,6 +31,32 @@ export const AdminPanel: React.FC = () => {
   // Block IP form state
   const [blockIpAddress, setBlockIpAddress] = useState('');
   const [blockReason, setBlockReason] = useState('');
+
+  // Load data from Supabase on mount
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [usersData, blockedIPsData] = await Promise.all([
+        fetchUsersFromSupabase(),
+        fetchBlockedIPsFromSupabase()
+      ]);
+      setUsers(usersData);
+      setBlockedIPs(blockedIPsData);
+    } catch (err) {
+      console.error('Error loading data:', err);
+      showMessage('error', 'Failed to load data from database');
+    }
+    setIsLoading(false);
+  };
+
+  const showMessage = (type: 'success' | 'error', text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 3000);
+  };
 
   const activeUsers = users.filter(u => u.isOnline).length;
   const totalRevenue = users.reduce((acc, user) => {
@@ -33,67 +70,98 @@ export const AdminPanel: React.FC = () => {
     setEditForm(user);
   };
 
-  const handleSave = () => {
-    const updatedUsers = users.map(u => (u.id === editingId ? { ...u, ...editForm } : u));
-    setUsers(updatedUsers);
-    // Sync with MOCK_USERS
-    const idx = MOCK_USERS.findIndex(u => u.id === editingId);
-    if (idx !== -1) {
-      MOCK_USERS[idx] = { ...MOCK_USERS[idx], ...editForm };
+  const handleSave = async () => {
+    if (!editingId) return;
+    
+    setIsSaving(true);
+    const updatedUser = { ...users.find(u => u.id === editingId)!, ...editForm };
+    
+    const success = await updateUserInSupabase(updatedUser);
+    
+    if (success) {
+      setUsers(users.map(u => (u.id === editingId ? updatedUser : u)));
+      showMessage('success', 'User updated successfully');
+    } else {
+      showMessage('error', 'Failed to update user');
     }
+    
     setEditingId(null);
+    setIsSaving(false);
   };
 
-  const handleBlockUser = (user: User) => {
-    const updatedUsers = users.map(u => 
-      u.id === user.id ? { ...u, isBlocked: !u.isBlocked } : u
-    );
-    setUsers(updatedUsers);
-    // Sync with MOCK_USERS
-    const idx = MOCK_USERS.findIndex(u => u.id === user.id);
-    if (idx !== -1) {
-      MOCK_USERS[idx] = { ...MOCK_USERS[idx], isBlocked: !MOCK_USERS[idx].isBlocked };
+  const handleBlockUser = async (user: User) => {
+    setIsSaving(true);
+    const updatedUser = { ...user, isBlocked: !user.isBlocked };
+    
+    const success = await updateUserInSupabase(updatedUser);
+    
+    if (success) {
+      setUsers(users.map(u => u.id === user.id ? updatedUser : u));
+      showMessage('success', user.isBlocked ? 'User unblocked' : 'User blocked');
+    } else {
+      showMessage('error', 'Failed to update user status');
     }
+    
+    setIsSaving(false);
   };
 
-  const handleBlockIP = () => {
+  const handleBlockIP = async () => {
     if (!blockIpAddress.trim()) return;
     
-    const newBlockedIP: BlockedIP = {
-      ip: blockIpAddress.trim(),
-      blockedAt: new Date().toISOString(),
-      reason: blockReason.trim() || 'No reason provided'
-    };
+    setIsSaving(true);
+    const success = await blockIPInSupabase(blockIpAddress.trim(), blockReason.trim());
     
-    setBlockedIPs([...blockedIPs, newBlockedIP]);
-    BLOCKED_IPS.push(newBlockedIP);
-    setBlockIpAddress('');
-    setBlockReason('');
-  };
-
-  const handleUnblockIP = (ip: string) => {
-    setBlockedIPs(blockedIPs.filter(b => b.ip !== ip));
-    const idx = BLOCKED_IPS.findIndex(b => b.ip === ip);
-    if (idx !== -1) {
-      BLOCKED_IPS.splice(idx, 1);
+    if (success) {
+      const newBlockedIP: BlockedIP = {
+        ip: blockIpAddress.trim(),
+        blockedAt: new Date().toISOString(),
+        reason: blockReason.trim() || 'No reason provided'
+      };
+      setBlockedIPs([newBlockedIP, ...blockedIPs]);
+      setBlockIpAddress('');
+      setBlockReason('');
+      showMessage('success', 'IP address blocked');
+    } else {
+      showMessage('error', 'Failed to block IP address');
     }
+    
+    setIsSaving(false);
   };
 
-  const handleAddUser = () => {
-    if (!newUserName.trim() || !newUserEmail.trim()) return;
+  const handleUnblockIP = async (ip: string) => {
+    setIsSaving(true);
+    const success = await unblockIPInSupabase(ip);
+    
+    if (success) {
+      setBlockedIPs(blockedIPs.filter(b => b.ip !== ip));
+      showMessage('success', 'IP address unblocked');
+    } else {
+      showMessage('error', 'Failed to unblock IP address');
+    }
+    
+    setIsSaving(false);
+  };
+
+  const handleAddUser = async () => {
+    if (!newUserName.trim() || !newUserEmail.trim()) {
+      showMessage('error', 'Name and email are required');
+      return;
+    }
     
     // Check if email already exists
     if (users.find(u => u.email.toLowerCase() === newUserEmail.toLowerCase())) {
-      alert('User with this email already exists!');
+      showMessage('error', 'User with this email already exists!');
       return;
     }
 
+    setIsSaving(true);
+    
     const randomIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
     
     const newUser: User = {
       id: `user-${Date.now()}`,
       name: newUserName.trim(),
-      email: newUserEmail.trim(),
+      email: newUserEmail.trim().toLowerCase(),
       role: newUserRole,
       plan: newUserPlan,
       dailyLimit: newUserPlan === 'Free' ? 50 : newUserPlan === 'Starter' ? 100 : newUserPlan === 'Pro' ? 500 : 100000,
@@ -104,30 +172,45 @@ export const AdminPanel: React.FC = () => {
       isBlocked: false
     };
 
-    setUsers([...users, newUser]);
-    MOCK_USERS.push(newUser);
+    const createdUser = await createUserInSupabase(newUser);
     
-    // Reset form
-    setNewUserName('');
-    setNewUserEmail('');
-    setNewUserPlan('Free');
-    setNewUserRole('user');
-    setActiveTab('users');
+    if (createdUser) {
+      setUsers([createdUser, ...users]);
+      // Reset form
+      setNewUserName('');
+      setNewUserEmail('');
+      setNewUserPlan('Free');
+      setNewUserRole('user');
+      setActiveTab('users');
+      showMessage('success', 'User created successfully');
+    } else {
+      showMessage('error', 'Failed to create user');
+    }
+    
+    setIsSaving(false);
   };
 
-  const handleDeleteUser = (userId: string) => {
+  const handleDeleteUser = async (userId: string) => {
     // Prevent deleting admin
     const userToDelete = users.find(u => u.id === userId);
     if (userToDelete?.role === 'admin') {
-      alert('Cannot delete admin user!');
+      showMessage('error', 'Cannot delete admin user!');
       return;
     }
     
-    setUsers(users.filter(u => u.id !== userId));
-    const idx = MOCK_USERS.findIndex(u => u.id === userId);
-    if (idx !== -1) {
-      MOCK_USERS.splice(idx, 1);
+    if (!confirm('Are you sure you want to delete this user?')) return;
+    
+    setIsSaving(true);
+    const success = await deleteUserFromSupabase(userId);
+    
+    if (success) {
+      setUsers(users.filter(u => u.id !== userId));
+      showMessage('success', 'User deleted successfully');
+    } else {
+      showMessage('error', 'Failed to delete user');
     }
+    
+    setIsSaving(false);
   };
 
   const filteredUsers = users.filter(u => 
@@ -135,16 +218,46 @@ export const AdminPanel: React.FC = () => {
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  if (isLoading) {
+    return (
+      <div className="p-8 flex items-center justify-center h-full">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto mb-4"></div>
+          <p className="text-slate-400">Loading admin data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 space-y-8 animate-fade-in h-full overflow-y-auto">
+      {/* Message Toast */}
+      {message && (
+        <div className={`fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg ${
+          message.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {message.text}
+        </div>
+      )}
+
       <div className="flex justify-between items-end">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">Admin Control Center</h1>
           <p className="text-slate-400">System analytics, user management, and IP blocking.</p>
         </div>
-        <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 px-4 py-2 rounded-full">
-           <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-           <span className="text-red-400 font-mono text-xs">LIVE ENVIRONMENT</span>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={loadData}
+            disabled={isLoading}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+          <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 px-4 py-2 rounded-full">
+             <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+             <span className="text-red-400 font-mono text-xs">LIVE ENVIRONMENT</span>
+          </div>
         </div>
       </div>
 
@@ -207,7 +320,7 @@ export const AdminPanel: React.FC = () => {
       {activeTab === 'users' && (
         <div className="bg-slate-800/50 border border-slate-700 rounded-2xl overflow-hidden flex flex-col min-h-[500px]">
           <div className="p-6 border-b border-slate-700 flex justify-between items-center">
-            <h2 className="text-lg font-bold text-white">User Directory</h2>
+            <h2 className="text-lg font-bold text-white">User Directory ({users.length} users)</h2>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4" />
               <input 
@@ -235,107 +348,122 @@ export const AdminPanel: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {filteredUsers.map((user) => (
-                  <tr key={user.id} className={`hover:bg-slate-700/30 transition-colors ${user.isBlocked ? 'opacity-50 bg-red-900/10' : ''}`}>
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${user.isBlocked ? 'bg-red-500' : user.isOnline ? 'bg-green-500' : 'bg-slate-500'}`} />
-                        <span>{user.isBlocked ? 'Blocked' : user.isOnline ? 'Online' : user.lastActive}</span>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="font-bold text-white">{user.name}</div>
-                      <div className="text-xs">{user.email}</div>
-                    </td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 rounded text-xs font-bold ${
-                        user.role === 'admin' ? 'bg-red-500/20 text-red-300' : 'bg-slate-600/20 text-slate-300'
-                      }`}>
-                        {user.role.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                       {editingId === user.id ? (
-                          <select 
-                            className="bg-slate-900 border border-slate-600 rounded p-1 text-white"
-                            value={editForm.plan}
-                            onChange={e => setEditForm({...editForm, plan: e.target.value as any})}
-                          >
-                            <option value="Free">Free</option>
-                            <option value="Starter">Starter</option>
-                            <option value="Pro">Pro</option>
-                            <option value="Enterprise">Enterprise</option>
-                          </select>
-                       ) : (
-                          <span className={`px-2 py-1 rounded text-xs font-bold 
-                            ${user.plan === 'Enterprise' ? 'bg-purple-500/20 text-purple-300' : 
-                              user.plan === 'Pro' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-600/20 text-slate-300'}`}>
-                            {user.plan}
-                          </span>
-                       )}
-                    </td>
-                    <td className="p-4 font-mono">
-                      {editingId === user.id ? (
-                        <input 
-                          type="number"
-                          className="bg-slate-900 border border-slate-600 rounded p-1 text-white w-24"
-                          value={editForm.dailyLimit}
-                          onChange={e => setEditForm({...editForm, dailyLimit: parseInt(e.target.value)})}
-                        />
-                      ) : (
-                        user.dailyLimit.toLocaleString()
-                      )}
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 bg-slate-700 rounded-full h-1.5">
-                          <div 
-                            className={`h-1.5 rounded-full ${user.recordsExtractedToday > user.dailyLimit * 0.9 ? 'bg-red-500' : 'bg-indigo-500'}`} 
-                            style={{ width: `${Math.min((user.recordsExtractedToday / user.dailyLimit) * 100, 100)}%` }}
-                          />
-                        </div>
-                        <span className="text-xs">{user.recordsExtractedToday}</span>
-                      </div>
-                    </td>
-                    <td className="p-4 font-mono text-xs text-slate-500">{user.ipAddress}</td>
-                    <td className="p-4">
-                      <div className="flex gap-2">
-                        {editingId === user.id ? (
-                          <>
-                            <button onClick={handleSave} className="p-1.5 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30" title="Save">
-                              <Save size={16} />
-                            </button>
-                            <button onClick={() => setEditingId(null)} className="p-1.5 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30" title="Cancel">
-                              <X size={16} />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button onClick={() => handleEdit(user)} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors" title="Edit">
-                              <Edit2 size={16} />
-                            </button>
-                            <button 
-                              onClick={() => handleBlockUser(user)} 
-                              className={`p-1.5 rounded transition-colors ${user.isBlocked ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'}`}
-                              title={user.isBlocked ? 'Unblock User' : 'Block User'}
-                            >
-                              {user.isBlocked ? <CheckCircle size={16} /> : <Ban size={16} />}
-                            </button>
-                            {user.role !== 'admin' && (
-                              <button 
-                                onClick={() => handleDeleteUser(user.id)} 
-                                className="p-1.5 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-colors"
-                                title="Delete User"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
+                {filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-8 text-center text-slate-400">
+                      {searchTerm ? 'No users found matching your search.' : 'No users in database. Add a user to get started.'}
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredUsers.map((user) => (
+                    <tr key={user.id} className={`hover:bg-slate-700/30 transition-colors ${user.isBlocked ? 'opacity-50 bg-red-900/10' : ''}`}>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${user.isBlocked ? 'bg-red-500' : user.isOnline ? 'bg-green-500' : 'bg-slate-500'}`} />
+                          <span>{user.isBlocked ? 'Blocked' : user.isOnline ? 'Online' : user.lastActive}</span>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="font-bold text-white">{user.name}</div>
+                        <div className="text-xs">{user.email}</div>
+                      </td>
+                      <td className="p-4">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                          user.role === 'admin' ? 'bg-red-500/20 text-red-300' : 'bg-slate-600/20 text-slate-300'
+                        }`}>
+                          {user.role.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                         {editingId === user.id ? (
+                            <select 
+                              className="bg-slate-900 border border-slate-600 rounded p-1 text-white"
+                              value={editForm.plan}
+                              onChange={e => setEditForm({...editForm, plan: e.target.value as any})}
+                            >
+                              <option value="Free">Free</option>
+                              <option value="Starter">Starter</option>
+                              <option value="Pro">Pro</option>
+                              <option value="Enterprise">Enterprise</option>
+                            </select>
+                         ) : (
+                            <span className={`px-2 py-1 rounded text-xs font-bold 
+                              ${user.plan === 'Enterprise' ? 'bg-purple-500/20 text-purple-300' : 
+                                user.plan === 'Pro' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-600/20 text-slate-300'}`}>
+                              {user.plan}
+                            </span>
+                         )}
+                      </td>
+                      <td className="p-4 font-mono">
+                        {editingId === user.id ? (
+                          <input 
+                            type="number"
+                            className="bg-slate-900 border border-slate-600 rounded p-1 text-white w-24"
+                            value={editForm.dailyLimit}
+                            onChange={e => setEditForm({...editForm, dailyLimit: parseInt(e.target.value)})}
+                          />
+                        ) : (
+                          user.dailyLimit.toLocaleString()
+                        )}
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-24 bg-slate-700 rounded-full h-1.5">
+                            <div 
+                              className={`h-1.5 rounded-full ${user.recordsExtractedToday > user.dailyLimit * 0.9 ? 'bg-red-500' : 'bg-indigo-500'}`} 
+                              style={{ width: `${Math.min((user.recordsExtractedToday / user.dailyLimit) * 100, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs">{user.recordsExtractedToday}</span>
+                        </div>
+                      </td>
+                      <td className="p-4 font-mono text-xs text-slate-500">{user.ipAddress}</td>
+                      <td className="p-4">
+                        <div className="flex gap-2">
+                          {editingId === user.id ? (
+                            <>
+                              <button 
+                                onClick={handleSave} 
+                                disabled={isSaving}
+                                className="p-1.5 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 disabled:opacity-50" 
+                                title="Save"
+                              >
+                                <Save size={16} />
+                              </button>
+                              <button onClick={() => setEditingId(null)} className="p-1.5 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30" title="Cancel">
+                                <X size={16} />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => handleEdit(user)} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors" title="Edit">
+                                <Edit2 size={16} />
+                              </button>
+                              <button 
+                                onClick={() => handleBlockUser(user)} 
+                                disabled={isSaving}
+                                className={`p-1.5 rounded transition-colors disabled:opacity-50 ${user.isBlocked ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'}`}
+                                title={user.isBlocked ? 'Unblock User' : 'Block User'}
+                              >
+                                {user.isBlocked ? <CheckCircle size={16} /> : <Ban size={16} />}
+                              </button>
+                              {user.role !== 'admin' && (
+                                <button 
+                                  onClick={() => handleDeleteUser(user.id)} 
+                                  disabled={isSaving}
+                                  className="p-1.5 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                                  title="Delete User"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -375,7 +503,8 @@ export const AdminPanel: React.FC = () => {
               <div className="flex items-end">
                 <button
                   onClick={handleBlockIP}
-                  className="bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+                  disabled={isSaving || !blockIpAddress.trim()}
+                  className="bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
                 >
                   Block IP
                 </button>
@@ -412,7 +541,8 @@ export const AdminPanel: React.FC = () => {
                       <td className="p-4">
                         <button
                           onClick={() => handleUnblockIP(blocked.ip)}
-                          className="px-3 py-1 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-colors text-xs font-medium"
+                          disabled={isSaving}
+                          className="px-3 py-1 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-colors text-xs font-medium disabled:opacity-50"
                         >
                           Unblock
                         </button>
@@ -483,9 +613,10 @@ export const AdminPanel: React.FC = () => {
             <div className="pt-4">
               <button
                 onClick={handleAddUser}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-all"
+                disabled={isSaving || !newUserName.trim() || !newUserEmail.trim()}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50"
               >
-                Create User Account
+                {isSaving ? 'Creating...' : 'Create User Account'}
               </button>
             </div>
           </div>
