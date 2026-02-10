@@ -1,4 +1,3 @@
-
 export interface InsurancePolicy {
   dot: string;
   carrier: string;
@@ -82,6 +81,13 @@ export interface User {
   lastActive: string;
   ipAddress: string;
   isOnline: boolean;
+  isBlocked?: boolean;
+}
+
+export interface BlockedIP {
+  ip: string;
+  blockedAt: string;
+  reason: string;
 }
 
 export type ViewState = 'dashboard' | 'scraper' | 'carrier-search' | 'insurance-scraper' | 'subscription' | 'settings' | 'admin';
