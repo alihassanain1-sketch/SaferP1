@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import { Truck, ChevronRight, Check, Shield, Zap, Lock } from 'lucide-react';
 import { User } from '../types';
-import { MOCK_USERS } from '../services/mockService';
+import { fetchUserByEmail, createUserInSupabase } from '../services/userService';
 
 interface LandingProps {
   onLogin: (user: User) => void;
@@ -14,6 +13,7 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Clear form when switching modes
   useEffect(() => {
@@ -23,92 +23,93 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
     setError(null);
   }, [authMode]);
 
-  const handleAuth = (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setIsLoading(true);
 
-    // 1. HARDCODED ADMIN CHECK
-    // This is the ONLY way to become the main Admin in this demo
-    if (email === 'wooohan3@gmail.com' && password === 'Zayn@1122') {
-      const adminUser: User = {
-        id: '1',
-        name: 'Admin User',
-        email: 'wooohan3@gmail.com',
-        role: 'admin',
-        plan: 'Enterprise',
-        dailyLimit: 100000,
-        recordsExtractedToday: 450,
-        lastActive: 'Now',
-        ipAddress: '192.168.1.1',
-        isOnline: true
-      };
-      // Ensure admin exists in DB for reference
-      const dbIndex = MOCK_USERS.findIndex(u => u.email === adminUser.email);
-      if (dbIndex === -1) MOCK_USERS.push(adminUser);
-      else MOCK_USERS[dbIndex] = adminUser; // Reset admin if it was corrupted
-
-      onLogin(adminUser);
-      return;
-    }
-
-    // 2. REGULAR USER LOGIC
-    if (authMode === 'login') {
-      // Find existing user in the mock database
-      const existingUser = MOCK_USERS.find(u => u.email.toLowerCase() === email.toLowerCase());
-
-      if (existingUser) {
-        // If the user tries to login with admin email but WRONG password
-        if (existingUser.role === 'admin') {
-           setError("Invalid admin credentials.");
-           return;
-        }
-
-        // Login successful - Update their status
-        const updatedUser = { ...existingUser, isOnline: true, lastActive: 'Now' };
-        onLogin(updatedUser);
-      } else {
-        // Fallback for Demo purposes: Create a temporary session user
-        // We do NOT default to ID 999 anymore to prevent collisions
-        const tempUser: User = {
-          id: `temp-${Date.now()}`,
-          name: email.split('@')[0],
-          email: email,
-          role: 'user',
-          plan: 'Starter',
-          dailyLimit: 100,
+    try {
+      // 1. HARDCODED ADMIN CHECK
+      // This is the ONLY way to become the main Admin in this demo
+      if (email === 'wooohan3@gmail.com' && password === 'Zayn@1122') {
+        const adminUser: User = {
+          id: '1',
+          name: 'Admin User',
+          email: 'wooohan3@gmail.com',
+          role: 'admin',
+          plan: 'Enterprise',
+          dailyLimit: 100000,
           recordsExtractedToday: 0,
           lastActive: 'Now',
-          ipAddress: '127.0.0.1',
-          isOnline: true
+          ipAddress: '192.168.1.1',
+          isOnline: true,
+          isBlocked: false
         };
-        MOCK_USERS.push(tempUser);
-        onLogin(tempUser);
-      }
-    } else {
-      // REGISTER LOGIC
-      const existingUser = MOCK_USERS.find(u => u.email.toLowerCase() === email.toLowerCase());
-      if (existingUser) {
-        setError("User with this email already exists. Please login.");
+        onLogin(adminUser);
         return;
       }
 
-      const randomIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
-      
-      const newUser: User = {
-        id: `user-${Date.now()}`, // Unique ID
-        name: name,
-        email: email,
-        role: 'user',
-        plan: 'Free',
-        dailyLimit: 100,
-        recordsExtractedToday: 0,
-        lastActive: 'Now',
-        ipAddress: randomIp,
-        isOnline: true
-      };
-      
-      MOCK_USERS.push(newUser);
-      onLogin(newUser);
+      // 2. REGULAR USER LOGIC
+      if (authMode === 'login') {
+        // Find existing user in Supabase
+        const existingUser = await fetchUserByEmail(email);
+
+        if (existingUser) {
+          // Check if user is blocked
+          if (existingUser.isBlocked) {
+            setError("Your account has been blocked. Please contact support.");
+            return;
+          }
+
+          // If the user tries to login with admin email but WRONG password
+          if (existingUser.role === 'admin') {
+            setError("Invalid admin credentials.");
+            return;
+          }
+
+          // Login successful - Update their status
+          const updatedUser = { ...existingUser, isOnline: true, lastActive: 'Now' };
+          onLogin(updatedUser);
+        } else {
+          setError("User not found. Please register first.");
+        }
+      } else {
+        // REGISTER LOGIC
+        const existingUser = await fetchUserByEmail(email);
+        if (existingUser) {
+          setError("User with this email already exists. Please login.");
+          return;
+        }
+
+        const randomIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+        
+        const newUser: User = {
+          id: `user-${Date.now()}`,
+          name: name,
+          email: email.toLowerCase(),
+          role: 'user',
+          plan: 'Free',
+          dailyLimit: 50,
+          recordsExtractedToday: 0,
+          lastActive: 'Now',
+          ipAddress: randomIp,
+          isOnline: true,
+          isBlocked: false
+        };
+        
+        const createdUser = await createUserInSupabase(newUser);
+        
+        if (createdUser) {
+          onLogin(createdUser);
+        } else {
+          setError("Failed to create account. Please try again.");
+        }
+      }
+    } catch (err) {
+      console.error('Auth error:', err);
+      setError("An error occurred. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -243,8 +244,12 @@ export const Landing: React.FC<LandingProps> = ({ onLogin }) => {
                 />
               </div>
 
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/20">
-                {authMode === 'login' ? 'Sign In' : 'Create Account'}
+              <button 
+                type="submit" 
+                disabled={isLoading}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+              >
+                {isLoading ? 'Please wait...' : (authMode === 'login' ? 'Sign In' : 'Create Account')}
               </button>
             </form>
 
